@@ -1,14 +1,13 @@
 const puppeteer = require("puppeteer");
 const moment = require("moment");
 const fs = require("fs");
+const md5 = require("md5");
 const path = require("path");
 
 const logger = require("../../lib/logger");
 
 // TO DO LIST
-// 1. md5 파일 조회 (가장 마지막으로 저장한 사건 url)
-// 2. 1번 url 이후의 url 수집
-// 3. md5 파일에 2번 url 로 저장
+// 1. onGoingFlag 설정: list 1000건까지..?
 
 const engine = (() => {
   const execute = function(params, callback) {
@@ -24,11 +23,26 @@ const engine = (() => {
 
     const now = moment();
     const saYear = moment().format("YYYY");
-    const termStartDt = moment(startDt).format("YYYY.MM.DD");
-    const termEndDt = moment(endDt).format("YYYY.MM.DD");
+    const termStartDt = moment()
+      .add(1, "day")
+      .format("YYYY.MM.DD");
+    const termEndDt = moment()
+      .add(7, "day")
+      .format("YYYY.MM.DD");
     const srnID = "PNO102001";
+    const lclsUtilCd = "0000802"; // 건물 > 주거용건물
+    const mclsUtilCd = "000080201"; // 건물 > 주거용건물
+    const gamEvalAmtGuganMax = "200000000"; // 감정평가액 (최대)
+    const notifyMinMgakPrcMax = "200000000"; // 최저매각가격 (최대))
     let pageNum = 1;
     let onGoingFlag = false;
+
+    const md5Path = "../md5/" + customer + ".out";
+    let md5Save = "";
+    let md5Check = "";
+    if (fs.existsSync(md5Path)) {
+      md5Check = fs.readFileSync(md5Path);
+    }
 
     // 브라우저 런치
     puppeteer
@@ -41,29 +55,17 @@ const engine = (() => {
         // 유저에이전트
         await page.setUserAgent(userAgent);
 
+        // 뷰 포트 설정
+        await page.setViewport({
+          width: 1920,
+          height: 1080
+        });
+
         try {
-          let parameter = {};
-          parameter.saYear = moment().format("YYYY");
-          parameter.srnID = srnID;
-          parameter.termEndDt = termEndDt;
-          parameter.termStartDt = termStartDt;
-
-          // await page.setRequestInterception(true);
-          // page.on("request", interceptedRequest => {
-          //   let overrides = {
-          //     method: "POST",
-          //     postData: JSON.stringify(parameter)
-          //   };
-          //   interceptedRequest.continue(overrides);
-          // });
-
-          // 뷰 포트 설정
-          await page.setViewport({
-            width: 1920,
-            height: 1080
-          });
-
-          requestUrl += `saYear=${saYear}&srnID=${srnID}&termEndDt=${termEndDt}&termStartDt=${termStartDt}`;
+          requestUrl +=
+            `saYear=${saYear}&srnID=${srnID}&termEndDt=${termEndDt}&termStartDt=${termStartDt}` +
+            `&lclsUtilCd=${lclsUtilCd}&mclsUtilCd=${mclsUtilCd}` +
+            `&gamEvalAmtGuganMax=${gamEvalAmtGuganMax}&notifyMinMgakPrcMax=${notifyMinMgakPrcMax}`;
 
           logger.debug("[chrome] Step #1. URL 접근");
           logger.debug("[chrome] ### requestUrl: " + requestUrl);
@@ -84,7 +86,7 @@ const engine = (() => {
             return __parseList(selectors);
           }, linkSelectors);
 
-          console.log(lists);
+          // logger.info(lists);
 
           if (lists === null) {
             await browser.close();
@@ -101,9 +103,23 @@ const engine = (() => {
             );
 
             let collectList = [];
+            let firstLink = true;
 
+            logger.debug("[chrome] ### 저장된 md5 " + md5Check);
             for (let list of lists) {
-              collectList.push(list);
+              let linkMd5 = md5(list.link);
+              list.md5 = linkMd5;
+              if (firstLink) {
+                md5Save = linkMd5;
+                firstLink = false;
+              }
+
+              if (md5Check != linkMd5) {
+                collectList.push(list);
+              } else {
+                onGoingFlag = false;
+                break;
+              }
             }
 
             if (collectList.length > 0) {
@@ -131,6 +147,7 @@ const engine = (() => {
                   if (err) throw err;
                 }
               );
+              await fs.writeFile(md5Path, md5Save);
             }
 
             if (onGoingFlag) {
