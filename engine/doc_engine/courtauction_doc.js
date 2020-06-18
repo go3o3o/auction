@@ -2,6 +2,7 @@ const querystring = require("querystring");
 const puppeteer = require("puppeteer");
 const moment = require("moment");
 const fs = require("fs-extra");
+const md5 = require("md5");
 const iconv = require("iconv-lite");
 
 const logger = require("../../lib/logger");
@@ -19,11 +20,52 @@ const getFiles = function(path, files) {
   });
 };
 
+// javascript:showMGakMulMseo('8318290BAC100C7A77E5EA92385EE5A6', 'YQN2WHHG1nS29x92QX9H4OfGYDEh%2FtsLiaWi1uevvqNX3UOok7b1mkAZy7DfpIjbTnpWDhYQT8erkdEqbmrAcM7yl9M9xMK%2FVuh0DBNRv7yt%2B1WwnA8mNrrhAerx7SCNAAkA', '서울중앙지방법원','20190130002019','3'); return false;
+function showMGakMulMseo(vMaemulDocId, vOrvParam, vJiwonNm, vSaNo, vMaemulSer) {
+  if (vMaemulDocId != null && vMaemulDocId != "null" && vMaemulDocId != "") {
+    document.getElementById("hJiwonNm").value = vJiwonNm;
+    document.getElementById("hSaNo").value = vSaNo;
+    document.getElementById("hMaemulSer").value = vMaemulSer;
+    document.getElementById("hOrvParam").value = vOrvParam;
+
+    actSubmit(
+      document.hform,
+      "/RetrieveRealEstMgakMulMseoInfo.laf",
+      "hidSubmit"
+    );
+    openErv301(
+      "frmErv301",
+      vOrvParam,
+      "http://orv.scourt.go.kr/orv/erv300/erv301.jsp"
+    );
+  } else {
+    alert("매각물건명세서가 없습니다.");
+  }
+}
+
 // TD DO LIST
 // 1. field 정의 후 inject script 수정
-// 2. attach file 수집
+// 2. attach: 매각물건명세서
 
 const engine = (function() {
+  const __download = async (url, filename) => {
+    return new Promise((resolve, reject) => {
+      axios({
+        method: "GET",
+        url: url,
+        responseType: "stream"
+      })
+        .then(response => {
+          let stream = response.data.pipe(fs.createWriteStream(filename));
+          stream.on("finish", function() {
+            resolve();
+          });
+        })
+        .catch(error => {
+          reject(error);
+        });
+    });
+  };
   const execute = function(params, callback) {
     const collectDataPath = params.collectDataPath;
     const userAgent = params.userAgent;
@@ -32,6 +74,7 @@ const engine = (function() {
     const injectScripts = params.injectScripts;
     const docSelectors = params.rule.docSelectors;
     const linkSelectors = params.rule.linkSelectors;
+    const attachSelectors = params.rule.attachSelectors;
     const crawlerInterval = linkSelectors.crawlerInterval;
 
     const now = moment();
@@ -114,8 +157,53 @@ const engine = (function() {
             // 문서 추출
             logger.debug("[chrome] Step #4. 문서 파싱");
             var result = await page.evaluate(function(selectors) {
-              return __parseDocument(selectors);
+              return __parseTable(selectors);
             }, docSelectors);
+
+            logger.info(result);
+
+            // 첨부파일 추출
+            logger.debug("[chrome] Step #5. 첨부파일 추출");
+            const attachs = await page.evaluate(function(selectors) {
+              return __parseAttachment(selectors);
+            }, attachSelectors);
+
+            logger.info(attachs);
+
+            for (const attach of attachs) {
+              if (
+                attach.link !== null &&
+                attach.name !== null &&
+                attach.uuid !== null
+              ) {
+                const fileName =
+                  collectDataPath +
+                  "docCollector/" +
+                  customer +
+                  "/" +
+                  attach.uuid;
+
+                let attachLink = await page.evaluate(
+                  function(selectors, str) {
+                    return __parseAttachLink(selectors, str);
+                  },
+                  attachSelectors,
+                  attach.link
+                );
+
+                logger.debug("[chrome] ### attachName: " + attach.name);
+                logger.debug("[chrome] ### attachLink: " + attachLink);
+                logger.debug("[chrome] ### attachRealName: " + attach.uuid);
+                logger.debug("[chrome] ### SavePath: " + fileName);
+
+                try {
+                  await __download(attachLink, fileName);
+                } catch (e) {
+                  await browser.close();
+                  throw Error("FAILED_ATTACH_DOWNLOAD");
+                }
+              }
+            }
 
             if (result === null) {
               await browser.close();
@@ -127,15 +215,20 @@ const engine = (function() {
               result.doc_url = link;
 
               result.source = source;
-              result.search_keyword_text = keyword;
               result.customer_id = customer;
+              result.uuid = md5(link);
 
-              result.uuid = md5Generator(
-                link,
-                result.pub_year,
-                result.pub_month,
-                result.pub_day
-              );
+              // 첨부파일 메타 정보 저장
+              if (attachs !== null) {
+                result.attachs = [];
+                for (const attach of attachs) {
+                  result.attachs.push({
+                    file_url: attach.link,
+                    file_name: attach.name,
+                    real_file_name: attach.uuid
+                  });
+                }
+              }
 
               // 저장
               const fileName =
@@ -210,8 +303,9 @@ engine.execute(
     source: "대한민국 법원경매정보",
     injectScripts: [
       "../inject_script/listParser.js",
-      "../inject_script/documentParser.js",
-      "../inject_script/datetimeParser.js"
+      "../inject_script/tableParser.js",
+      "../inject_script/datetimeParser.js",
+      "../inject_script/attachParser.js"
     ],
     rule: {
       linkSelectors: {
@@ -223,13 +317,23 @@ engine.execute(
         linkPattern:
           "https://www.courtauction.go.kr/RetrieveRealEstCarHvyMachineMulDetailInfo.laf?saNo=#2#&jiwonNm=#1#"
       },
+      // attach: 매각물건명세서
       docSelectors: {
-        documentSelector: "main[class] article[class]",
-        documentNoResultSelector: "div.error-container",
-        contentSelector: "div:nth-child(3) > div > ul > div[role] span",
-        writerSelector: "div:nth-child(2) > div[class] > div:first-child a",
-        datetimeSelector: "time[datetime]",
-        datetimeAttr: "datetime"
+        // iframeSelector: "frame[name=indexFrame]",
+        documentSelector: "div#contents",
+        titleSelector: "div#search_title ul",
+        tableHeaderSelector: "tbody",
+        tableHeaderRowSelector: "tr",
+        tableHeaderCellSelector: "th",
+        tableColKeySelector: "tr",
+        tableBodySelector: "tbody",
+        tableBodyRowSelector: "tr",
+        tableBodyCellSelector: "td"
+      },
+      attachSelectors: {
+        attachListSelector: "div.table_contents > div.tbl_btn",
+        attachSelector: "a",
+        attachAttr: "javascript:href"
       }
     }
   },
