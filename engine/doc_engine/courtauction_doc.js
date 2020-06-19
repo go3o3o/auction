@@ -2,8 +2,10 @@ const querystring = require("querystring");
 const puppeteer = require("puppeteer");
 const moment = require("moment");
 const fs = require("fs-extra");
+const path = require("path");
 const md5 = require("md5");
 const iconv = require("iconv-lite");
+const Axios = require("axios");
 
 const logger = require("../../lib/logger");
 
@@ -20,29 +22,7 @@ const getFiles = function(path, files) {
   });
 };
 
-// TD DO LIST
-// attach 매각물건명세서는 맥북에서 다운로드가 안됨
-// 추후 window 에서 테스트해볼 것
-
 const engine = (function() {
-  const __download = async (url, filename) => {
-    return new Promise((resolve, reject) => {
-      axios({
-        method: "GET",
-        url: url,
-        responseType: "stream"
-      })
-        .then(response => {
-          let stream = response.data.pipe(fs.createWriteStream(filename));
-          stream.on("finish", function() {
-            resolve();
-          });
-        })
-        .catch(error => {
-          reject(error);
-        });
-    });
-  };
   const execute = function(params, callback) {
     const collectDataPath = params.collectDataPath;
     const userAgent = params.userAgent;
@@ -137,7 +117,7 @@ const engine = (function() {
               return __parseTable(selectors);
             }, docSelectors);
 
-            logger.info(result);
+            // logger.info(result);
             let attachFileName = result.doc_title.split(": ")[2];
 
             // 첨부파일 추출
@@ -146,7 +126,9 @@ const engine = (function() {
               return __parseAttachment(selectors);
             }, attachSelectors);
 
-            logger.info(attachs);
+            // logger.info(attachs);
+
+            let file_path = "";
 
             for (const attach of attachs) {
               if (
@@ -165,7 +147,7 @@ const engine = (function() {
                   await fs.mkdirSync(folderPath);
                 }
 
-                const fileName = folderPath + "/" + attachFileName;
+                file_path = path.resolve(folderPath, attachFileName);
 
                 let attachLink = await page.evaluate(
                   function(selectors, str) {
@@ -178,15 +160,35 @@ const engine = (function() {
                 logger.debug("[chrome] ### attachName: " + attachFileName);
                 logger.debug("[chrome] ### attachLink: " + attachLink);
                 logger.debug("[chrome] ### attachRealName: " + attach.uuid);
-                logger.debug("[chrome] ### SavePath: " + fileName);
+                logger.debug("[chrome] ### SavePath: " + file_path);
 
-                // try {
-                //   await __download(attachLink, fileName);
-                // } catch (e) {
-                //   await browser.close();
-                //   throw Error("FAILED_ATTACH_DOWNLOAD");
-                // }
+                // 첨부파일 메타 정보 저장
+                result.attachs = [];
+
+                result.attachs.push({
+                  file_url: attachLink,
+                  file_path: file_path
+                });
+
+                try {
+                  // axios  파일 다운로드
+                  const response = await Axios({
+                    method: "GET",
+                    url: attachLink,
+                    responseType: "stream"
+                  });
+
+                  // pipe the result stream into a file on disc
+                  await response.data.pipe(fs.createWriteStream(file_path));
+
+                  await page.waitFor(crawlerInterval);
+                } catch (e) {
+                  await browser.close();
+                  console.log(e);
+                  throw Error("FAILED_ATTACH_DOWNLOAD");
+                }
               }
+              break;
             }
 
             if (result === null) {
@@ -201,17 +203,6 @@ const engine = (function() {
               result.source = source;
               result.customer_id = customer;
               result.uuid = md5(link);
-
-              // 첨부파일 메타 정보 저장
-              if (attachs !== null) {
-                result.attachs = [];
-                for (const attach of attachs) {
-                  result.attachs.push({
-                    file_url: attach.link,
-                    file_path: fileName
-                  });
-                }
-              }
 
               // 저장
               const fileName =
@@ -320,9 +311,9 @@ engine.execute(
         attachLinkPatternRegex:
           "\\(\\'(.*)\\'\\,.*\\'(.*)\\'\\,.*\\'(.*)\\'\\,.*\\'(.*)\\'\\,.*\\'(.*)\\'\\)",
         // attachLinkPattern:
-        //   "http://orv.scourt.go.kr/orv/erv300/erv301.jsp?hJiwonNm=#3#&hSaNo=#4#&hMaemulSer=#5#&hOrvParam=#2#"
+        //   "http://orv.scourt.go.kr/orv/erv300/erv301.jsp?orvParam=#2#"
         attachLinkPattern:
-          "http://orv.scourt.go.kr/orv/erv300/erv301.jsp?orvParam=#2#"
+          "http://ecfs.scourt.go.kr/ecf/ecf/ECF000/SearchInsideEDMSCmd.dev?user_id=sT58PQVQrbkNsKGDPl0ypQAA==AAMA&doc_id=#1#"
       }
     }
   },
