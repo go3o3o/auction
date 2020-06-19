@@ -220,7 +220,6 @@ engine.execute(
     source: "대한민국 법원경매정보",
     injectScripts: [
       "../inject_script/listParser.js",
-      "../inject_script/documentParser.js",
       "../inject_script/datetimeParser.js"
     ],
     rule: {
@@ -229,9 +228,9 @@ engine.execute(
         listSelector: "tr[class^=Ltbl_list_lvl] td.txtleft div[class^=tbl_btm]",
         linkSelector: "a:first-child",
         linkAttr: "javascript:onclick",
-        linkPatternRegex: "\\(\\'(.*)\\'\\,.*\\'(.*)\\'\\,",
+        linkPatternRegex: "\\(\\'(.*)\\'\\,\\'(.*)\\'\\,\\'(.*)\\'\\)",
         linkPattern:
-          "https://www.courtauction.go.kr/RetrieveRealEstCarHvyMachineMulDetailInfo.laf?saNo=#2#&jiwonNm=#1#"
+          "https://www.courtauction.go.kr/RetrieveRealEstCarHvyMachineMulDetailInfo.laf?saNo=#2#&maemulSer=#3#&jiwonNm=#1#"
       }
     }
   },
