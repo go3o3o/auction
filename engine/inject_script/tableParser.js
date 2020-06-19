@@ -12,7 +12,8 @@ function __notNull(obj) {
 
 function __parseTable(selectors) {
   console.log("__parseTable");
-  var result = [];
+  var result = {};
+  var datas = [];
   var data = {};
   var frameDocument;
 
@@ -101,10 +102,8 @@ function __parseTable(selectors) {
         .replace(/\n/g, "");
     }
 
-    data.doc_title = title;
+    result.doc_title = title;
   }
-
-  result.push(data);
 
   var tableElems = tableArea.querySelectorAll(selectors.tableSelector);
   //   var tableElems = tableArea.querySelector(selectors.tableSelector);
@@ -238,7 +237,7 @@ function __parseTable(selectors) {
 
         data.key = key;
         data.value = value;
-        result.push(data);
+        datas.push(data);
       } //Cols
     } // Rows
 
@@ -246,8 +245,9 @@ function __parseTable(selectors) {
     //   result.push(data);
     // }
   }
+  result.datas = datas;
 
-  return JSON.stringify(result);
+  return result;
 }
 
 function __getKey(keys, index, type) {

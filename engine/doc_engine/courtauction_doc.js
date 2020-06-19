@@ -20,32 +20,9 @@ const getFiles = function(path, files) {
   });
 };
 
-// javascript:showMGakMulMseo('8318290BAC100C7A77E5EA92385EE5A6', 'YQN2WHHG1nS29x92QX9H4OfGYDEh%2FtsLiaWi1uevvqNX3UOok7b1mkAZy7DfpIjbTnpWDhYQT8erkdEqbmrAcM7yl9M9xMK%2FVuh0DBNRv7yt%2B1WwnA8mNrrhAerx7SCNAAkA', '서울중앙지방법원','20190130002019','3'); return false;
-function showMGakMulMseo(vMaemulDocId, vOrvParam, vJiwonNm, vSaNo, vMaemulSer) {
-  if (vMaemulDocId != null && vMaemulDocId != "null" && vMaemulDocId != "") {
-    document.getElementById("hJiwonNm").value = vJiwonNm;
-    document.getElementById("hSaNo").value = vSaNo;
-    document.getElementById("hMaemulSer").value = vMaemulSer;
-    document.getElementById("hOrvParam").value = vOrvParam;
-
-    actSubmit(
-      document.hform,
-      "/RetrieveRealEstMgakMulMseoInfo.laf",
-      "hidSubmit"
-    );
-    openErv301(
-      "frmErv301",
-      vOrvParam,
-      "http://orv.scourt.go.kr/orv/erv300/erv301.jsp"
-    );
-  } else {
-    alert("매각물건명세서가 없습니다.");
-  }
-}
-
 // TD DO LIST
-// 1. field 정의 후 inject script 수정
-// 2. attach: 매각물건명세서
+// attach 매각물건명세서는 맥북에서 다운로드가 안됨
+// 추후 window 에서 테스트해볼 것
 
 const engine = (function() {
   const __download = async (url, filename) => {
@@ -161,6 +138,7 @@ const engine = (function() {
             }, docSelectors);
 
             logger.info(result);
+            let attachFileName = result.doc_title.split(": ")[2];
 
             // 첨부파일 추출
             logger.debug("[chrome] Step #5. 첨부파일 추출");
@@ -176,32 +154,38 @@ const engine = (function() {
                 attach.name !== null &&
                 attach.uuid !== null
               ) {
-                const fileName =
+                let folderPath =
                   collectDataPath +
-                  "docCollector/" +
+                  "attachCollector/" +
                   customer +
                   "/" +
-                  attach.uuid;
+                  now.format("YYYYMMDD");
+
+                if (!fs.existsSync(folderPath)) {
+                  await fs.mkdirSync(folderPath);
+                }
+
+                const fileName = folderPath + "/" + attachFileName;
 
                 let attachLink = await page.evaluate(
                   function(selectors, str) {
                     return __parseAttachLink(selectors, str);
                   },
                   attachSelectors,
-                  attach.link
+                  attach.script
                 );
 
-                logger.debug("[chrome] ### attachName: " + attach.name);
+                logger.debug("[chrome] ### attachName: " + attachFileName);
                 logger.debug("[chrome] ### attachLink: " + attachLink);
                 logger.debug("[chrome] ### attachRealName: " + attach.uuid);
                 logger.debug("[chrome] ### SavePath: " + fileName);
 
-                try {
-                  await __download(attachLink, fileName);
-                } catch (e) {
-                  await browser.close();
-                  throw Error("FAILED_ATTACH_DOWNLOAD");
-                }
+                // try {
+                //   await __download(attachLink, fileName);
+                // } catch (e) {
+                //   await browser.close();
+                //   throw Error("FAILED_ATTACH_DOWNLOAD");
+                // }
               }
             }
 
@@ -224,8 +208,7 @@ const engine = (function() {
                 for (const attach of attachs) {
                   result.attachs.push({
                     file_url: attach.link,
-                    file_name: attach.name,
-                    real_file_name: attach.uuid
+                    file_path: fileName
                   });
                 }
               }
@@ -233,7 +216,7 @@ const engine = (function() {
               // 저장
               const fileName =
                 "D-1-" + now.format("YYYYMMDDHHmm-ssSSS") + ".json";
-              logger.debug("[chrome] Step #5. 저장 ");
+              logger.debug("[chrome] Step #6. 저장 ");
               let folderPath =
                 collectDataPath +
                 "docCollector/" +
@@ -259,7 +242,7 @@ const engine = (function() {
           }
 
           // 브라우저 닫기
-          logger.debug("[chrome] Step #6. 수집 종료");
+          logger.debug("[chrome] Step #7. 수집 종료");
           await browser.close();
           callback(null);
         } catch (error) {
@@ -313,7 +296,7 @@ engine.execute(
         listSelector: "tr[class^=Ltbl_list_lvl] td.txtleft div[class^=tbl_btm]",
         linkSelector: "a:first-child",
         linkAttr: "javascript:onclick",
-        linkPatternRegex: "\\(\\'(.*)\\'\\,.*\\'(.*)\\'\\,",
+        linkPatternRegex: "\\(\\'(.*)\\'\\,\\'(.*)\\'\\,\\'(.*)\\'\\)",
         linkPattern:
           "https://www.courtauction.go.kr/RetrieveRealEstCarHvyMachineMulDetailInfo.laf?saNo=#2#&jiwonNm=#1#"
       },
@@ -333,7 +316,13 @@ engine.execute(
       attachSelectors: {
         attachListSelector: "div.table_contents > div.tbl_btn",
         attachSelector: "a",
-        attachAttr: "javascript:href"
+        attachAttr: "javascript:onclick",
+        attachLinkPatternRegex:
+          "\\(\\'(.*)\\'\\,.*\\'(.*)\\'\\,.*\\'(.*)\\'\\,.*\\'(.*)\\'\\,.*\\'(.*)\\'\\)",
+        // attachLinkPattern:
+        //   "http://orv.scourt.go.kr/orv/erv300/erv301.jsp?hJiwonNm=#3#&hSaNo=#4#&hMaemulSer=#5#&hOrvParam=#2#"
+        attachLinkPattern:
+          "http://orv.scourt.go.kr/orv/erv300/erv301.jsp?orvParam=#2#"
       }
     }
   },
