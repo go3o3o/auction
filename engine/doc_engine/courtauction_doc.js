@@ -6,7 +6,6 @@ const path = require("path");
 const md5 = require("md5");
 const iconv = require("iconv-lite");
 const Axios = require("axios");
-const request = require("request-promise-native");
 
 const logger = require("../../lib/logger");
 
